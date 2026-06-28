@@ -13,7 +13,7 @@ render_login_and_registration(authenticator, config, db)
 
 if st.session_state.get("authentication_status"):
     authenticator.logout(location='sidebar')
-    st.sidebar.write(f'Welcome *{st.session_state.get("name") }*')
+    st.sidebar.write(f'Welcome *{st.session_state.get("name")}*')
     username = st.session_state.get("username")
     if not username:
         st.error("Session missing username — please log out and log in again.")
@@ -32,10 +32,29 @@ if st.session_state.get("authentication_status"):
     if not foods:
         st.info("No foods configured. Add foods on the Foods page.")
     else:
-        cols = st.columns(2)
+        # Inject CSS for square buttons
+        st.markdown("""
+            <style>
+            div.stButton > button {
+                width: 100%;
+                height: 80px;
+                white-space: normal;
+                word-wrap: break-word;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                display: -webkit-box;
+                -webkit-line-clamp: 3;
+                -webkit-box-orient: vertical;
+                line-height: 1.3em;
+                padding: 8px;
+            }
+            </style>
+        """, unsafe_allow_html=True)
+
+        cols = st.columns(3)
         for idx, food in enumerate(foods):
-            col = cols[idx % 2]
-            label = f"{food.get('name')} ({food.get('calories')} kcal)"
+            col = cols[idx % 3]
+            label = food.get('name')
             if col.button(label, key=f"add_{str(food.get('_id'))}"):
                 db.add_calorie_entry({
                     'username': username,
