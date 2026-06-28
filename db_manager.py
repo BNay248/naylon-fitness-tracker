@@ -46,7 +46,7 @@ class TrainerDB:
         result = self.db.calorie_foods.insert_one(food_doc)
         return str(result.inserted_id)
 
-    def get_foods_by_user(self, username: str, sort_by: str = 'position', descending: bool = False) -> List[Dict]:
+    def get_foods_by_user(self, username: str, sort_by: str = 'position', descending: bool = False, **kwargs) -> List[Dict]:
         query = self.db.calorie_foods.find({'username': username})
         if sort_by:
             direction = -1 if descending else 1
