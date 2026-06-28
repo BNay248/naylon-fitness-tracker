@@ -57,20 +57,33 @@ if st.session_state.get("authentication_status"):
             name = food.get('name', '')
             food_items += f'<a class="food-btn" href="?add_food={food_id}"><span>{name}</span></a>\n'
 
+        num_rows = -(-len(foods) // 3)
+        height = num_rows * 175 + 40
+
         html = f"""
         <!DOCTYPE html>
         <html>
         <head>
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <style>
-            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-            body {{ background: transparent; }}
+            * {{
+                box-sizing: border-box;
+                margin: 0;
+                padding: 0;
+            }}
+            html, body {{
+                background: transparent;
+                overflow-x: hidden;
+                width: 100%;
+                max-width: 100%;
+            }}
             .food-grid {{
                 display: grid;
                 grid-template-columns: repeat(3, 1fr);
                 gap: 10px;
                 padding: 4px;
                 width: 100%;
+                max-width: 100%;
             }}
             .food-btn {{
                 display: flex;
@@ -92,6 +105,7 @@ if st.session_state.get("authentication_status"):
                 hyphens: auto;
                 line-height: 1.3;
                 transition: background-color 0.15s;
+                width: 100%;
             }}
             .food-btn:active {{
                 background-color: #4a4a6a;
@@ -111,10 +125,6 @@ if st.session_state.get("authentication_status"):
         </body>
         </html>
         """
-
-        # Calculate height based on number of rows
-        num_rows = -(-len(foods) // 3)  # ceiling division
-        height = num_rows * 130 + 20
 
         components.html(html, height=height, scrolling=False)
 
