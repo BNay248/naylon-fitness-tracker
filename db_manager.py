@@ -29,12 +29,64 @@ class TrainerDB:
 
     # Calorie tracker methods
     def add_food(self, username: str, food: Dict) -> str:
-        food_doc = {'username': username, 'name': food.get('name'), 'calories': int(food.get('calories', 0))}
+        highest = list(
+            self.db.calorie_foods.find({'username': username}).sort('position', -1).limit(1)
+        )
+        next_position = 1
+        if highest:
+            next_position = int(highest[0].get('position', 0)) + 1
+
+        food_doc = {
+            'username': username,
+            'name': food.get('name'),
+            'calories': int(food.get('calories', 0)),
+            'position': next_position,
+            'created_at': datetime.now(),
+        }
         result = self.db.calorie_foods.insert_one(food_doc)
         return str(result.inserted_id)
 
-    def get_foods_by_user(self, username: str) -> List[Dict]:
-        return list(self.db.calorie_foods.find({'username': username}))
+    def get_foods_by_user(self, username: str, sort_by: str = 'position', descending: bool = False) -> List[Dict]:
+        query = self.db.calorie_foods.find({'username': username})
+        if sort_by:
+            direction = -1 if descending else 1
+            query = query.sort(sort_by, direction)
+        return list(query)
+
+    def get_food_by_id(self, food_id: str) -> Optional[Dict]:
+        try:
+            return self.db.calorie_foods.find_one({'_id': ObjectId(food_id)})
+        except:
+            return None
+
+    def update_food_position(self, food_id: str, position: int) -> bool:
+        try:
+            result = self.db.calorie_foods.update_one(
+                {'_id': ObjectId(food_id)},
+                {'$set': {'position': int(position)}}
+            )
+            return result.modified_count > 0
+        except:
+            return False
+
+    def move_food_position(self, username: str, food_id: str, direction: int) -> bool:
+        foods = self.get_foods_by_user(username)
+        index = next((i for i, f in enumerate(foods) if str(f.get('_id')) == str(food_id)), None)
+        if index is None:
+            return False
+
+        target_index = index + direction
+        if target_index < 0 or target_index >= len(foods):
+            return False
+
+        first = foods[index]
+        second = foods[target_index]
+        first_pos = int(first.get('position', index + 1))
+        second_pos = int(second.get('position', target_index + 1))
+
+        if not self.update_food_position(str(first.get('_id')), second_pos):
+            return False
+        return self.update_food_position(str(second.get('_id')), first_pos)
 
     def delete_food(self, food_id: str) -> bool:
         try:

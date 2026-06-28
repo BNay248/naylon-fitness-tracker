@@ -35,11 +35,22 @@ if st.session_state.get("authentication_status"):
     st.divider()
     st.subheader("Your foods")
     foods = db.get_foods_by_user(username)
-    for f in foods:
-        cols = st.columns([4,1])
-        cols[0].write(f"**{f.get('name')}** — {f.get('calories')} kcal")
-        if cols[1].button("Delete", key=str(f.get('_id'))):
-            db.delete_food(str(f.get('_id')))
-            st.rerun()
+
+    if not foods:
+        st.info("No foods configured. Add foods using the form above.")
+    else:
+        for idx, f in enumerate(foods):
+            pos = f.get('position', idx + 1)
+            cols = st.columns([4, 1, 1, 1])
+            cols[0].write(f"**{pos}. {f.get('name')}** — {f.get('calories')} kcal")
+            if cols[1].button("↑", key=f"up_{str(f.get('_id'))}"):
+                db.move_food_position(username, str(f.get('_id')), -1)
+                st.rerun()
+            if cols[2].button("↓", key=f"down_{str(f.get('_id'))}"):
+                db.move_food_position(username, str(f.get('_id')), 1)
+                st.rerun()
+            if cols[3].button("Delete", key=f"del_{str(f.get('_id'))}"):
+                db.delete_food(str(f.get('_id')))
+                st.rerun()
 else:
     st.stop()
