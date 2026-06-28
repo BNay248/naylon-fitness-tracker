@@ -35,8 +35,12 @@ if st.session_state.get("authentication_status"):
         # Build query param click handler
         params = st.query_params
         if "add_food" in params:
-            food_id = params["add_food"]
-            food = db.get_food_by_id(food_id)
+            # query params can be lists; normalize to single string
+            food_id = params.get("add_food")
+            if isinstance(food_id, (list, tuple)):
+                food_id = food_id[0] if food_id else None
+            # find the food from the already-loaded foods list instead of calling a missing DB method
+            food = next((f for f in foods if str(f.get('_id')) == str(food_id)), None)
             if food:
                 db.add_calorie_entry({
                     'username': username,
