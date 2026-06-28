@@ -29,71 +29,74 @@ class TrainerDB:
 
     # Calorie tracker methods
     def add_food(self, username: str, food: Dict) -> str:
-        highest = list(
-            self.db.calorie_foods.find({'username': username}).sort('position', -1).limit(1)
-        )
-        next_position = 1
-        if highest:
-            next_position = int(highest[0].get('position', 0)) + 1
-
+        last_food_cursor = self.db.calorie_foods.find({'username': username}).sort('position', -1).limit(1)
+        last_food = next(last_food_cursor, None)
+        max_position = last_food.get('position', 0) if last_food else 0
         food_doc = {
             'username': username,
             'name': food.get('name'),
             'calories': int(food.get('calories', 0)),
-            'position': next_position,
             'created_at': datetime.now(),
+            'position': max_position + 1,
         }
         result = self.db.calorie_foods.insert_one(food_doc)
         return str(result.inserted_id)
 
-    def get_foods_by_user(self, username: str, sort_by: str = 'position', descending: bool = False, **kwargs) -> List[Dict]:
+    def get_foods_by_user(self, username: str, sort_by: str = 'position', descending: bool = False) -> List[Dict]:
         query = self.db.calorie_foods.find({'username': username})
-        if sort_by:
-            direction = -1 if descending else 1
-            query = query.sort(sort_by, direction)
-        return list(query)
-
-    def get_food_by_id(self, food_id: str) -> Optional[Dict]:
-        try:
-            return self.db.calorie_foods.find_one({'_id': ObjectId(food_id)})
-        except:
-            return None
-
-    def update_food_position(self, food_id: str, position: int) -> bool:
-        try:
-            result = self.db.calorie_foods.update_one(
-                {'_id': ObjectId(food_id)},
-                {'$set': {'position': int(position)}}
-            )
-            return result.modified_count > 0
-        except:
-            return False
-
-    def move_food_position(self, username: str, food_id: str, direction: int) -> bool:
-        foods = self.get_foods_by_user(username)
-        index = next((i for i, f in enumerate(foods) if str(f.get('_id')) == str(food_id)), None)
-        if index is None:
-            return False
-
-        target_index = index + direction
-        if target_index < 0 or target_index >= len(foods):
-            return False
-
-        first = foods[index]
-        second = foods[target_index]
-        first_pos = int(first.get('position', index + 1))
-        second_pos = int(second.get('position', target_index + 1))
-
-        if not self.update_food_position(str(first.get('_id')), second_pos):
-            return False
-        return self.update_food_position(str(second.get('_id')), first_pos)
+        direction = -1 if descending else 1
+        query = query.sort(sort_by, direction)
+        foods = list(query)
+        if sort_by == 'position' and any('position' not in f for f in foods):
+            self.normalize_food_positions(username)
+            foods = list(self.db.calorie_foods.find({'username': username}).sort(sort_by, direction))
+        return foods
 
     def delete_food(self, food_id: str) -> bool:
         try:
+            food = self.db.calorie_foods.find_one({'_id': ObjectId(food_id)})
             result = self.db.calorie_foods.delete_one({'_id': ObjectId(food_id)})
-            return result.deleted_count > 0
+            if result.deleted_count > 0 and food:
+                self.normalize_food_positions(food['username'])
+                return True
+            return False
         except:
             return False
+
+    def update_food_position(self, food_id: str, new_position: int) -> bool:
+        try:
+            food = self.db.calorie_foods.find_one({'_id': ObjectId(food_id)})
+            if not food:
+                return False
+            username = food['username']
+            current_position = int(food.get('position', 0))
+            total = self.db.calorie_foods.count_documents({'username': username})
+            new_position = max(1, min(int(new_position), total))
+            if new_position == current_position:
+                return True
+            if new_position < current_position:
+                self.db.calorie_foods.update_many(
+                    {'username': username, 'position': {'$gte': new_position, '$lt': current_position}},
+                    {'$inc': {'position': 1}}
+                )
+            else:
+                self.db.calorie_foods.update_many(
+                    {'username': username, 'position': {'$gt': current_position, '$lte': new_position}},
+                    {'$inc': {'position': -1}}
+                )
+            self.db.calorie_foods.update_one({'_id': ObjectId(food_id)}, {'$set': {'position': new_position}})
+            return True
+        except:
+            return False
+
+    def normalize_food_positions(self, username: str) -> None:
+        foods = list(self.db.calorie_foods.find({'username': username}).sort('position', 1))
+        for index, food in enumerate(foods, start=1):
+            if food.get('position') != index:
+                self.db.calorie_foods.update_one(
+                    {'_id': food['_id']},
+                    {'$set': {'position': index}}
+                )
 
     def add_calorie_entry(self, entry: Dict) -> str:
         entry_doc = {

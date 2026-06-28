@@ -28,32 +28,8 @@ if st.session_state.get("authentication_status"):
 
     st.metric("Calories Today", f"{total}")
 
-    sort_option = st.selectbox(
-        "Sort foods by",
-        [
-            "Custom order",
-            "Name (A-Z)",
-            "Name (Z-A)",
-            "Calories (Low → High)",
-            "Calories (High → Low)",
-            "Added (Newest first)",
-            "Added (Oldest first)",
-        ],
-        index=0,
-    )
-
-    sort_map = {
-        "Custom order": ("position", False),
-        "Name (A-Z)": ("name", False),
-        "Name (Z-A)": ("name", True),
-        "Calories (Low → High)": ("calories", False),
-        "Calories (High → Low)": ("calories", True),
-        "Added (Newest first)": ("created_at", True),
-        "Added (Oldest first)": ("created_at", False),
-    }
-
-    sort_by, descending = sort_map.get(sort_option, ("position", False))
-    foods = db.get_foods_by_user(username, sort_by=sort_by, descending=descending)
+    st.info("Foods are shown in the explicit order you set on the Foods page.")
+    foods = db.get_foods_by_user(username)
 
     if not foods:
         st.info("No foods configured. Add foods on the Foods page.")
