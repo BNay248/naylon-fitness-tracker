@@ -20,39 +20,6 @@ if st.session_state.get("authentication_status"):
 
     st.title("Calorie Tracker")
 
-    # Inject CSS to force square grid buttons
-    st.markdown("""
-    <style>
-        /* Force the button columns into a grid */
-        div[data-testid="column"] > div > div > div > div.stButton > button {
-            width: 100% !important;
-            aspect-ratio: 1 / 1 !important;
-            height: auto !important;
-            white-space: normal !important;
-            word-break: break-word !important;
-            overflow: hidden !important;
-            display: -webkit-box !important;
-            -webkit-line-clamp: 4 !important;
-            -webkit-box-orient: vertical !important;
-            font-size: 13px !important;
-            font-weight: 600 !important;
-            line-height: 1.3 !important;
-            padding: 8px !important;
-        }
-
-        /* Remove gaps between columns on mobile */
-        div[data-testid="columns"] {
-            gap: 10px !important;
-        }
-
-        /* Make columns not collapse on mobile */
-        div[data-testid="column"] {
-            min-width: 0 !important;
-            flex: 1 1 0% !important;
-        }
-    </style>
-    """, unsafe_allow_html=True)
-
     @st.cache_data(ttl=60)
     def get_foods(uname):
         return db.get_foods_by_user(uname)
@@ -60,7 +27,24 @@ if st.session_state.get("authentication_status"):
     foods = get_foods(username)
 
     @st.fragment
-    def calorie_counter():
+    def main_page():
+        # Handle query param click inside fragment
+        params = st.query_params
+        if "add_food" in params:
+            food_id = params.get("add_food")
+            if isinstance(food_id, (list, tuple)):
+                food_id = food_id[0] if food_id else None
+            food = next((f for f in foods if str(f.get('_id')) == str(food_id)), None)
+            if food:
+                db.add_calorie_entry({
+                    'username': username,
+                    'food_name': food.get('name'),
+                    'calories': int(food.get('calories', 0)),
+                    'created_at': datetime.now()
+                })
+            st.query_params.clear()
+
+        # Calorie counter + undo
         midnight = datetime.combine(date.today(), time.min)
         entries = db.get_calorie_entries_by_user_since(username, midnight) # type: ignore
         total = sum([e.get('calories', 0) for e in entries])
@@ -76,30 +60,55 @@ if st.session_state.get("authentication_status"):
                     db.delete_calorie_entry(str(latest['_id']))
                     st.rerun(scope="fragment")
 
-    calorie_counter()
+        # Pure HTML grid - no iframe, just markdown
+        if not foods:
+            st.info("No foods configured. Add foods on the Foods page.")
+            return
 
-    if not foods:
-        st.info("No foods configured. Add foods on the Foods page.")
-    else:
-        @st.fragment
-        def food_grid():
-            cols = st.columns(3)
-            for idx, food in enumerate(foods):
-                col = cols[idx % 3]
-                with col:
-                    if st.button(
-                        food.get('name', ''),
-                        key=f"food_{str(food.get('_id'))}"
-                    ):
-                        db.add_calorie_entry({
-                            'username': username,
-                            'food_name': food.get('name'),
-                            'calories': int(food.get('calories', 0)),
-                            'created_at': datetime.now()
-                        })
-                        st.rerun(scope="fragment")
+        food_items = ""
+        for food in foods:
+            food_id = str(food.get('_id'))
+            name = food.get('name', '')
+            food_items += f"""
+            <a href="?add_food={food_id}" style="
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                aspect-ratio: 1 / 1;
+                background-color: #262730;
+                color: white;
+                border: 1px solid #555;
+                border-radius: 10px;
+                text-align: center;
+                font-size: 13px;
+                font-weight: 600;
+                padding: 8px;
+                overflow: hidden;
+                text-decoration: none;
+                cursor: pointer;
+                word-break: break-word;
+                line-height: 1.3;
+            "><span style="
+                display: -webkit-box;
+                -webkit-line-clamp: 4;
+                -webkit-box-orient: vertical;
+                overflow: hidden;
+            ">{name}</span></a>
+            """
 
-        food_grid()
+        st.markdown(f"""
+        <div style="
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            padding: 4px;
+            width: 100%;
+        ">
+            {food_items}
+        </div>
+        """, unsafe_allow_html=True)
+
+    main_page()
 
 else:
     st.stop()
