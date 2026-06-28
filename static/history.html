@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History - Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; background: #0e1117; color: white; padding: 16px; }
+  .hidden { display: none; }
+  nav { display: flex; gap: 12px; margin-bottom: 20px; border-bottom: 1px solid #333; padding-bottom: 12px; }
+  nav a { color: #aaa; text-decoration: none; font-size: 14px; font-weight: 600; }
+  nav a.active { color: white; border-bottom: 2px solid #4a90d9; padding-bottom: 4px; }
+  .logout-btn { background: none; border: none; color: #aaa; font-size: 13px; cursor: pointer; }
+  h1 { font-size: 22px; margin-bottom: 20px; }
+  .chart-wrap { background: #1e1e2e; border-radius: 12px; padding: 16px; }
+  .auth-box { max-width: 360px; margin: 60px auto; background: #1e1e2e; border-radius: 12px; padding: 24px; }
+  .auth-box h2 { margin-bottom: 16px; }
+  .auth-box input { width: 100%; padding: 10px; margin-bottom: 12px; border-radius: 8px; border: 1px solid #555; background: #262730; color: white; font-size: 14px; }
+  .auth-box button { width: 100%; padding: 10px; border-radius: 8px; border: none; background: #4a90d9; color: white; font-size: 15px; cursor: pointer; }
+  .error { color: #ff6b6b; font-size: 13px; margin-bottom: 8px; }
+</style>
+</head>
+<body>
+
+<div id="auth-section" class="hidden">
+  <div class="auth-box">
+    <h2>Login</h2>
+    <div id="auth-error" class="error hidden"></div>
+    <input id="username" type="text" placeholder="Username">
+    <input id="password" type="password" placeholder="Password">
+    <button onclick="login()">Login</button>
+  </div>
+</div>
+
+<div id="app-section" class="hidden">
+  <nav>
+    <a href="/">Tracker</a>
+    <a href="/foods">Foods</a>
+    <a href="/history" class="active">History</a>
+    <button class="logout-btn" onclick="logout()">Logout</button>
+  </nav>
+  <h1>History</h1>
+  <div class="chart-wrap">
+    <canvas id="chart"></canvas>
+  </div>
+</div>
+
+<script>
+  async function login() {
+    const username = document.getElementById('username').value.trim();
+    const password = document.getElementById('password').value;
+    const res = await fetch('/api/login', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({username, password})
+    });
+    if (!res.ok) {
+      const d = await res.json();
+      document.getElementById('auth-error').textContent = d.detail;
+      document.getElementById('auth-error').classList.remove('hidden');
+      return;
+    }
+    showApp();
+  }
+
+  async function logout() {
+    await fetch('/api/logout', {method: 'POST'});
+    document.getElementById('app-section').classList.add('hidden');
+    document.getElementById('auth-section').classList.remove('hidden');
+  }
+
+  async function showApp() {
+    document.getElementById('auth-section').classList.add('hidden');
+    document.getElementById('app-section').classList.remove('hidden');
+    loadHistory();
+  }
+
+  async function loadHistory() {
+    const res = await fetch('/api/calories/history');
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.length) {
+      document.querySelector('.chart-wrap').innerHTML = '<p style="color:#aaa;padding:20px">No data yet</p>';
+      return;
+    }
+    new Chart(document.getElementById('chart'), {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.date),
+        datasets: [{
+          label: 'Calories',
+          data: data.map(d => d.calories),
+          backgroundColor: '#4a90d9',
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { color: '#222' } },
+          y: { ticks: { color: '#aaa' }, grid: { color: '#222' } }
+        }
+      }
+    });
+  }
+
+  fetch('/api/me').then(res => {
+    if (res.ok) showApp();
+    else document.getElementById('auth-section').classList.remove('hidden');
+  });
+</script>
+</body>
+</html>
