@@ -122,3 +122,10 @@ class TrainerDB:
             {'$sort': {'_id': 1}}
         ]
         return list(self.db.calorie_entries.aggregate(pipeline))
+
+    def delete_calorie_entry(self, entry_id: str) -> bool:
+        try:
+            result = self.db.calorie_entries.delete_one({"_id": ObjectId(entry_id)})
+            return result.deleted_count > 0
+        except:
+            return False
