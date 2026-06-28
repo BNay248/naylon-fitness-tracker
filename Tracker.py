@@ -27,9 +27,9 @@ if st.session_state.get("authentication_status"):
 
     foods = get_foods(username)
 
-    # Fragment only handles counter + click processing
     @st.fragment
-    def calorie_counter():
+    def whole_page():
+        # Handle click
         params = st.query_params
         if "add_food" in params:
             food_id = params.get("add_food")
@@ -45,6 +45,7 @@ if st.session_state.get("authentication_status"):
                 })
             st.query_params.clear()
 
+        # Calorie counter
         midnight = datetime.combine(date.today(), time.min)
         entries = db.get_calorie_entries_by_user_since(username, midnight) # type: ignore
         total = sum([e.get('calories', 0) for e in entries])
@@ -60,12 +61,11 @@ if st.session_state.get("authentication_status"):
                     db.delete_calorie_entry(str(latest['_id']))
                     st.rerun(scope="fragment")
 
-    calorie_counter()
+        # iframe inside fragment
+        if not foods:
+            st.info("No foods configured. Add foods on the Foods page.")
+            return
 
-    # iframe is OUTSIDE the fragment - never rerenders
-    if not foods:
-        st.info("No foods configured. Add foods on the Foods page.")
-    else:
         food_items = ""
         for food in foods:
             food_id = str(food.get('_id'))
@@ -136,6 +136,8 @@ if st.session_state.get("authentication_status"):
         """
 
         components.html(html, height=height, scrolling=False)
+
+    whole_page()
 
 else:
     st.stop()
