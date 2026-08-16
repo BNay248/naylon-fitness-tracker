@@ -43,7 +43,10 @@
   </nav>
   <h1>History</h1>
   <div class="chart-wrap">
-    <canvas id="chart"></canvas>
+    <canvas id="calorie-chart"></canvas>
+  </div>
+  <div class="chart-wrap">
+    <canvas id="protein-chart"></canvas>
   </div>
 </div>
 
@@ -77,20 +80,40 @@
   }
 
   async function loadHistory() {
-    const res = await fetch('/api/calories/history');
+    const res = await fetch('/api/nutrition/history');
     if (!res.ok) return;
     const data = await res.json();
     if (!data.length) {
       document.querySelector('.chart-wrap').innerHTML = '<p style="color:#aaa;padding:20px">No data yet</p>';
       return;
     }
-    new Chart(document.getElementById('chart'), {
+    new Chart(document.getElementById('calorie-chart'), {
       type: 'bar',
       data: {
         labels: data.map(d => d.date),
         datasets: [{
           label: 'Calories',
           data: data.map(d => d.calories),
+          backgroundColor: '#4a90d9',
+          borderRadius: 6,
+        }]
+      },
+      options: {
+        responsive: true,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#aaa' }, grid: { color: '#222' } },
+          y: { ticks: { color: '#aaa' }, grid: { color: '#222' } }
+        }
+      }
+    });
+    new Chart(document.getElementById('protein-chart'), {
+      type: 'bar',
+      data: {
+        labels: data.map(d => d.date),
+        datasets: [{
+          label: 'Protein',
+          data: data.map(d => d.protein),
           backgroundColor: '#4a90d9',
           borderRadius: 6,
         }]

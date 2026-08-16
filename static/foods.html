@@ -54,6 +54,7 @@
   <div class="add-form">
     <input id="food-name" type="text" placeholder="Food name">
     <input id="food-cal" type="number" placeholder="Calories" min="0">
+    <input id="food-protein" type="number" placeholder="Protein" min="0">
     <button onclick="addFood()">Add Food</button>
   </div>
 
@@ -101,6 +102,7 @@
       row.innerHTML = `
         <div class="food-name">${food.name}</div>
         <div class="food-cal">${food.calories} kcal</div>
+        <div class="food-protein">${food.protein} g</div>
         <input type="number" id="pos-${food.id}" value="${food.position}" min="1" max="${foods.length}">
         <button class="set-btn" onclick="setPosition('${food.id}', ${foods.length})">Set</button>
         <button class="del-btn" onclick="deleteFood('${food.id}')">Delete</button>
@@ -112,13 +114,15 @@
   async function addFood() {
     const name = document.getElementById('food-name').value.trim();
     const calories = parseInt(document.getElementById('food-cal').value) || 0;
+    const protein = parseInt(document.getElementById('food-protein').value) || 0;
     if (!name) return alert('Please enter a food name');
     await fetch('/api/foods', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, calories})
+      body: JSON.stringify({name, calories, protein})
     });
     document.getElementById('food-name').value = '';
     document.getElementById('food-cal').value = '';
+    document.getElementById('food-protein').value = '';
     loadFoods();
   }
 

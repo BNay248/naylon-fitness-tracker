@@ -97,16 +97,17 @@ def me(request: Request):
 def get_foods(request: Request):
     user = get_current_user(request)
     foods = db.get_foods_by_user(user["username"])
-    return [{"id": str(f["_id"]), "name": f["name"], "calories": f.get("calories", 0), "position": f.get("position", 0)} for f in foods]
+    return [{"id": str(f["_id"]), "name": f["name"], "calories": f.get("calories", 0), "protein": f.get("protein", 0), "position": f.get("position", 0)} for f in foods]
 
 class FoodRequest(BaseModel):
     name: str
     calories: int
+    protein: int
 
 @app.post("/api/foods")
 def add_food(req: FoodRequest, request: Request):
     user = get_current_user(request)
-    db.add_food(user["username"], {"name": req.name, "calories": req.calories})
+    db.add_food(user["username"], {"name": req.name, "calories": req.calories, "protein": req.protein})
     return {"ok": True}
 
 @app.delete("/api/foods/{food_id}")
@@ -129,20 +130,21 @@ def update_position(food_id: str, req: PositionRequest, request: Request):
 class EntryRequest(BaseModel):
     food_id: str
 
-@app.get("/api/calories/today")
-def calories_today(request: Request):
+@app.get("/api/nutrition/today")
+def nutrition_today(request: Request):
     user = get_current_user(request)
     midnight = datetime.combine(date.today(), time.min)
-    entries = db.get_calorie_entries_by_user_since(user["username"], midnight)
-    total = sum(e.get("calories", 0) for e in entries)
+    entries = db.get_nutrition_entries_by_user_since(user["username"], midnight)
+    calorie_total = sum(e.get("calories", 0) for e in entries)
+    protein_total = sum(e.get("protein", 0) for e in entries)
     latest_id = None
     if entries:
         latest = max(entries, key=lambda e: e.get("created_at", datetime.min))
         latest_id = str(latest["_id"])
-    return {"total": total, "latest_id": latest_id}
+    return {"calorie_total": calorie_total, "protein_total": protein_total, "latest_id": latest_id}
 
-@app.post("/api/calories")
-def add_calorie(req: EntryRequest, request: Request):
+@app.post("/api/nutrition")
+def add_nutrition(req: EntryRequest, request: Request):
     user = get_current_user(request)
     foods = db.get_foods_by_user(user["username"])
     food = next((f for f in foods if str(f["_id"]) == req.food_id), None)
@@ -152,18 +154,20 @@ def add_calorie(req: EntryRequest, request: Request):
         "username": user["username"],
         "food_name": food["name"],
         "calories": int(food.get("calories", 0)),
+        "protein": int(food.get("protein", 0)),
         "created_at": datetime.now()
     })
     return {"ok": True}
 
-@app.delete("/api/calories/{entry_id}")
-def delete_calorie(entry_id: str, request: Request):
+@app.delete("/api/nutrition/{entry_id}")
+def delete_nutrition(entry_id: str, request: Request):
     get_current_user(request)
-    db.delete_calorie_entry(entry_id)
+    db.delete_nutrition_entry(entry_id)
     return {"ok": True}
 
-@app.get("/api/calories/history")
-def calorie_history(request: Request):
+@app.get("/api/nutrition/history")
+def nutrition_history(request: Request):
     user = get_current_user(request)
     rows = db.aggregate_daily_totals(user["username"])
-    return [{"date": r["_id"], "calories": r["total"]} for r in rows]
+    return [{"date": r["_id"], "total_calories": r["total_calories"], "total_protein": r["total_protein"]} for r in rows]
+

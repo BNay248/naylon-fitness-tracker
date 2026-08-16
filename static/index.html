@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Calorie Tracker</title>
+<title>Nutrition Tracker</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: sans-serif; background: #0e1117; color: white; padding: 16px; }
@@ -23,9 +23,23 @@
   nav a { color: #aaa; text-decoration: none; font-size: 14px; font-weight: 600; }
   nav a.active { color: white; border-bottom: 2px solid #4a90d9; padding-bottom: 4px; }
   .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
-  .header-left h1 { font-size: 22px; }
-  .header-left .calorie-count { font-size: 36px; font-weight: 700; color: #4a90d9; }
-  .header-left .calorie-label { font-size: 12px; color: #aaa; }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 16px; /* space between calorie and protein counters */
+  }
+
+  /* Optional: style the new protein elements to match calories */
+  .protein-label, .calorie-label {
+    font-size: 12px;
+    color: #aaa;
+  }
+
+  .protein-count, .calorie-count {
+    font-size: 36px;
+    font-weight: 700;
+    color: #4a90d9;
+  }
   .undo-btn { background: #3a3a4a; border: 1px solid #555; color: white; padding: 10px 16px; border-radius: 8px; font-size: 14px; cursor: pointer; }
   .undo-btn:active { background: #555; }
   .logout-btn { background: none; border: none; color: #aaa; font-size: 13px; cursor: pointer; }
@@ -77,13 +91,18 @@
     <button class="logout-btn" onclick="logout()">Logout</button>
   </nav>
 
-  <div class="header">
-    <div class="header-left">
-      <div class="calorie-label">CALORIES TODAY</div>
-      <div class="calorie-count" id="calorie-total">—</div>
-    </div>
-    <button class="undo-btn" onclick="undo()" id="undo-btn" style="display:none">↩️ Undo</button>
+<div class="header">
+  <div class="header-left">
+    <!-- Calories -->
+    <div class="calorie-label">CALORIES TODAY</div>
+    <div class="calorie-count" id="calorie-total">—</div>
+    
+    <!-- Protein (new) -->
+    <div class="protein-label">PROTEIN TODAY</div>
+    <div class="protein-count" id="protein-total">—</div>
   </div>
+  <button class="undo-btn" onclick="undo()" id="undo-btn" style="display:none">↩️ Undo</button>
+</div>
 
   <div class="food-grid" id="food-grid"></div>
 </div>
@@ -145,14 +164,15 @@
     document.getElementById('auth-section').classList.add('hidden');
     document.getElementById('app-section').classList.remove('hidden');
     loadFoods();
-    loadCalories();
+    loadNutrition();
   }
 
-  async function loadCalories() {
-    const res = await fetch('/api/calories/today');
+  async function loadNutrition() {
+    const res = await fetch('/api/nutrition/today');
     if (!res.ok) return;
     const data = await res.json();
-    document.getElementById('calorie-total').textContent = data.total;
+    document.getElementById('calorie-total').textContent = data.total_calories;
+    document.getElementById('protein-total').textContent = data.total_protein;
     latestEntryId = data.latest_id;
     document.getElementById('undo-btn').style.display = latestEntryId ? 'block' : 'none';
   }
@@ -173,17 +193,17 @@
   }
 
   async function addEntry(foodId) {
-    await fetch('/api/calories', {
+    await fetch('/api/nutrition', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({food_id: foodId})
     });
-    loadCalories();
+    loadNutrition();
   }
 
   async function undo() {
     if (!latestEntryId) return;
-    await fetch(`/api/calories/${latestEntryId}`, {method: 'DELETE'});
-    loadCalories();
+    await fetch(`/api/nutrition/${latestEntryId}`, {method: 'DELETE'});
+    loadNutrition();
   }
 
   // Check if already logged in
