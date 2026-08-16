@@ -135,13 +135,13 @@ def nutrition_today(request: Request):
     user = get_current_user(request)
     midnight = datetime.combine(date.today(), time.min)
     entries = db.get_nutrition_entries_by_user_since(user["username"], midnight)
-    calorie_total = sum(e.get("calories", 0) for e in entries)
-    protein_total = sum(e.get("protein", 0) for e in entries)
+    total_calories = sum(e.get("calories", 0) for e in entries)
+    total_protein = sum(e.get("protein", 0) for e in entries)
     latest_id = None
     if entries:
         latest = max(entries, key=lambda e: e.get("created_at", datetime.min))
         latest_id = str(latest["_id"])
-    return {"calorie_total": calorie_total, "protein_total": protein_total, "latest_id": latest_id}
+    return {"total_calories": total_calories, "total_protein": total_protein, "latest_id": latest_id}
 
 @app.post("/api/nutrition")
 def add_nutrition(req: EntryRequest, request: Request):
