@@ -93,7 +93,7 @@
         labels: data.map(d => d.date),
         datasets: [{
           label: 'Calories',
-          data: data.map(d => d.calories),
+          data: data.map(d => d.total_calories),
           backgroundColor: '#4a90d9',
           borderRadius: 6,
         }]
@@ -113,7 +113,7 @@
         labels: data.map(d => d.date),
         datasets: [{
           label: 'Protein',
-          data: data.map(d => d.protein),
+          data: data.map(d => d.total_protein),
           backgroundColor: '#4a90d9',
           borderRadius: 6,
         }]
