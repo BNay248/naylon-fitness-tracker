@@ -150,7 +150,7 @@ def add_nutrition(req: EntryRequest, request: Request):
     food = next((f for f in foods if str(f["_id"]) == req.food_id), None)
     if not food:
         raise HTTPException(status_code=404, detail="Food not found")
-    db.add_calorie_entry({
+    db.add_nutrition_entry({
         "username": user["username"],
         "food_name": food["name"],
         "calories": int(food.get("calories", 0)),
