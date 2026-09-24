@@ -48,6 +48,10 @@ def foods_page():
 def history_page():
     return FileResponse("static/history.html")
 
+@app.get("/sw.js")
+def service_worker():
+    return FileResponse("static/sw.js", media_type="application/javascript")
+
 # ==================== AUTH ====================
 
 class LoginRequest(BaseModel):
@@ -128,7 +132,11 @@ def update_position(food_id: str, req: PositionRequest, request: Request):
 # ==================== CALORIES ====================
 
 class EntryRequest(BaseModel):
-    food_id: str
+    food_id: str | None = None
+    name: str | None = None
+    calories: int | None = None
+    protein: int | None = None
+    client_id: str | None = None
 
 @app.get("/api/nutrition/today")
 def nutrition_today(request: Request):
@@ -146,16 +154,27 @@ def nutrition_today(request: Request):
 @app.post("/api/nutrition")
 def add_nutrition(req: EntryRequest, request: Request):
     user = get_current_user(request)
-    foods = db.get_foods_by_user(user["username"])
-    food = next((f for f in foods if str(f["_id"]) == req.food_id), None)
-    if not food:
-        raise HTTPException(status_code=404, detail="Food not found")
+    if req.food_id:
+        foods = db.get_foods_by_user(user["username"])
+        food = next((f for f in foods if str(f["_id"]) == req.food_id), None)
+        if not food:
+            raise HTTPException(status_code=404, detail="Food not found")
+        food_name = food["name"]
+        calories = int(food.get("calories", 0))
+        protein = int(food.get("protein", 0))
+    else:
+        if req.calories is None and req.protein is None:
+            raise HTTPException(status_code=400, detail="Provide a food_id or calories/protein")
+        food_name = req.name.strip() if req.name and req.name.strip() else "Manual entry"
+        calories = int(req.calories or 0)
+        protein = int(req.protein or 0)
     db.add_nutrition_entry({
         "username": user["username"],
-        "food_name": food["name"],
-        "calories": int(food.get("calories", 0)),
-        "protein": int(food.get("protein", 0)),
-        "created_at": datetime.now()
+        "food_name": food_name,
+        "calories": calories,
+        "protein": protein,
+        "created_at": datetime.now(),
+        "client_id": req.client_id
     })
     return {"ok": True}
 

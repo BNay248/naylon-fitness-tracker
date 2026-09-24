@@ -100,12 +100,18 @@ class TrainerDB:
                 )
 
     def add_nutrition_entry(self, entry: Dict) -> str:
+        client_id = entry.get('client_id')
+        if client_id:
+            existing = self.db.nutrition_entries.find_one({'username': entry.get('username'), 'client_id': client_id})
+            if existing:
+                return str(existing['_id'])
         entry_doc = {
             'username': entry.get('username'),
             'food_name': entry.get('food_name'),
             'calories': int(entry.get('calories', 0)),
             'protein': int(entry.get('protein', 0)),
-            'created_at': entry.get('created_at', datetime.now())
+            'created_at': entry.get('created_at', datetime.now()),
+            'client_id': client_id
         }
         result = self.db.nutrition_entries.insert_one(entry_doc)
         return str(result.inserted_id)

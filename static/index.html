@@ -4,6 +4,11 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Nutrition Tracker</title>
+<link rel="manifest" href="/static/manifest.json">
+<link rel="apple-touch-icon" href="/static/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0e1117">
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: sans-serif; background: #0e1117; color: white; padding: 16px; }
@@ -43,6 +48,17 @@
   .undo-btn { background: #3a3a4a; border: 1px solid #555; color: white; padding: 10px 16px; border-radius: 8px; font-size: 14px; cursor: pointer; }
   .undo-btn:active { background: #555; }
   .logout-btn { background: none; border: none; color: #aaa; font-size: 13px; cursor: pointer; }
+
+  /* MANUAL ENTRY */
+  .manual-toggle { color: #4a90d9; font-size: 13px; background: none; border: none; cursor: pointer; padding: 0; margin-bottom: 12px; text-decoration: underline; }
+  .manual-form { display: none; background: #1e1e2e; border-radius: 10px; padding: 12px; margin-bottom: 16px; gap: 8px; }
+  .manual-form.open { display: flex; flex-wrap: wrap; }
+  .manual-form input { flex: 1 1 100px; padding: 8px; border-radius: 8px; border: 1px solid #555; background: #262730; color: white; font-size: 14px; }
+  .manual-form button { flex: 1 1 100%; padding: 10px; border-radius: 8px; border: none; background: #4a90d9; color: white; font-size: 14px; font-weight: 600; cursor: pointer; }
+
+  /* SYNC STATUS */
+  .sync-status { font-size: 12px; color: #e0a030; margin-bottom: 12px; display: none; }
+  .sync-status.visible { display: block; }
 
   /* FOOD GRID */
   .food-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -104,12 +120,91 @@
   <button class="undo-btn" onclick="undo()" id="undo-btn" style="display:none">↩️ Undo</button>
 </div>
 
+  <div id="sync-status" class="sync-status"></div>
+
+  <button class="manual-toggle" onclick="toggleManualForm()">✏️ Enter values manually</button>
+  <div class="manual-form" id="manual-form">
+    <input id="manual-name" type="text" placeholder="Name (optional)">
+    <input id="manual-cal" type="number" placeholder="Calories" min="0" inputmode="numeric">
+    <input id="manual-protein" type="number" placeholder="Protein" min="0" inputmode="numeric">
+    <button onclick="addManualEntry()">Log Entry</button>
+  </div>
+
   <div class="food-grid" id="food-grid"></div>
 </div>
 
 <script>
   let isRegister = false;
   let latestEntryId = null;
+
+  // ---- Offline queue ----
+  const QUEUE_KEY = 'tracker_pending_queue';
+  const TOTALS_KEY = 'tracker_last_server_totals';
+
+  function loadQueue() {
+    try { return JSON.parse(localStorage.getItem(QUEUE_KEY)) || []; }
+    catch { return []; }
+  }
+  function saveQueue(queue) {
+    try { localStorage.setItem(QUEUE_KEY, JSON.stringify(queue)); } catch {}
+  }
+  function loadCachedTotals() {
+    try { return JSON.parse(localStorage.getItem(TOTALS_KEY)) || { total_calories: 0, total_protein: 0, latest_id: null }; }
+    catch { return { total_calories: 0, total_protein: 0, latest_id: null }; }
+  }
+  function saveCachedTotals(totals) {
+    try { localStorage.setItem(TOTALS_KEY, JSON.stringify(totals)); } catch {}
+  }
+
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+      const r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+  }
+
+  function renderDisplay() {
+    const server = loadCachedTotals();
+    const queue = loadQueue();
+    const pendingCal = queue.reduce((s, e) => s + (e.calories || 0), 0);
+    const pendingProtein = queue.reduce((s, e) => s + (e.protein || 0), 0);
+    document.getElementById('calorie-total').textContent = server.total_calories + pendingCal;
+    document.getElementById('protein-total').textContent = server.total_protein + pendingProtein;
+    latestEntryId = server.latest_id;
+
+    const undoBtn = document.getElementById('undo-btn');
+    undoBtn.style.display = (queue.length > 0 || latestEntryId) ? 'block' : 'none';
+
+    const status = document.getElementById('sync-status');
+    if (queue.length > 0) {
+      status.textContent = `${queue.length} entr${queue.length === 1 ? 'y' : 'ies'} queued, will sync when back online…`;
+      status.classList.add('visible');
+    } else {
+      status.classList.remove('visible');
+    }
+  }
+
+  async function flushQueue() {
+    let queue = loadQueue();
+    while (queue.length > 0) {
+      const item = queue[0];
+      try {
+        const res = await fetch('/api/nutrition', {
+          method: 'POST', headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(item)
+        });
+        if (!res.ok) break; // e.g. auth expired — stop and let user re-login
+      } catch {
+        break; // network still down
+      }
+      queue.shift();
+      saveQueue(queue);
+      renderDisplay();
+    }
+    // Re-sync authoritative totals from the server once the queue drains
+    if (queue.length === 0) await loadNutrition();
+  }
 
   function showError(msg) {
     const el = document.getElementById('auth-error');
@@ -164,17 +259,21 @@
     document.getElementById('auth-section').classList.add('hidden');
     document.getElementById('app-section').classList.remove('hidden');
     loadFoods();
+    renderDisplay(); // show cached/queued state immediately, even if offline
     loadNutrition();
+    flushQueue();
   }
 
   async function loadNutrition() {
-    const res = await fetch('/api/nutrition/today');
-    if (!res.ok) return;
-    const data = await res.json();
-    document.getElementById('calorie-total').textContent = data.total_calories;
-    document.getElementById('protein-total').textContent = data.total_protein;
-    latestEntryId = data.latest_id;
-    document.getElementById('undo-btn').style.display = latestEntryId ? 'block' : 'none';
+    try {
+      const res = await fetch('/api/nutrition/today');
+      if (!res.ok) return;
+      const data = await res.json();
+      saveCachedTotals(data);
+    } catch {
+      // offline — keep showing cached totals
+    }
+    renderDisplay();
   }
 
   async function loadFoods() {
@@ -187,24 +286,63 @@
       const btn = document.createElement('div');
       btn.className = 'food-btn';
       btn.innerHTML = `<span>${food.name}</span>`;
-      btn.onclick = () => addEntry(food.id);
+      btn.onclick = () => addEntry(food.id, null, food.calories, food.protein);
       grid.appendChild(btn);
     });
   }
 
-  async function addEntry(foodId) {
-    await fetch('/api/nutrition', {
-      method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({food_id: foodId})
-    });
-    loadNutrition();
+  async function addEntry(foodId, name, calories, protein) {
+    const item = { client_id: uuid(), food_id: foodId, name, calories, protein };
+    const queue = loadQueue();
+    queue.push(item);
+    saveQueue(queue);
+    renderDisplay(); // optimistic: show it immediately, synced or not
+    flushQueue();
+  }
+
+  function toggleManualForm() {
+    document.getElementById('manual-form').classList.toggle('open');
+  }
+
+  function addManualEntry() {
+    const name = document.getElementById('manual-name').value.trim();
+    const calories = parseInt(document.getElementById('manual-cal').value) || 0;
+    const protein = parseInt(document.getElementById('manual-protein').value) || 0;
+    if (!calories && !protein) return alert('Enter calories or protein');
+    addEntry(null, name, calories, protein);
+    document.getElementById('manual-name').value = '';
+    document.getElementById('manual-cal').value = '';
+    document.getElementById('manual-protein').value = '';
   }
 
   async function undo() {
+    const queue = loadQueue();
+    if (queue.length > 0) {
+      // Last action hasn't synced yet — just drop it locally, nothing to tell the server.
+      queue.pop();
+      saveQueue(queue);
+      renderDisplay();
+      return;
+    }
     if (!latestEntryId) return;
-    await fetch(`/api/nutrition/${latestEntryId}`, {method: 'DELETE'});
+    try {
+      await fetch(`/api/nutrition/${latestEntryId}`, {method: 'DELETE'});
+    } catch {
+      return; // offline and nothing queued to undo — can't do anything
+    }
     loadNutrition();
   }
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+  }
+
+  // Retry the queue whenever connectivity returns, the tab regains focus, or periodically as a fallback
+  window.addEventListener('online', flushQueue);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') flushQueue();
+  });
+  setInterval(flushQueue, 20000);
 
   // Check if already logged in
   fetch('/api/me').then(res => {
