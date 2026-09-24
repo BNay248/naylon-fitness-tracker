@@ -172,6 +172,8 @@
     });
   }
 
+  let syncStatusTimer = null;
+
   function renderDisplay() {
     const server = loadCachedTotals();
     const queue = loadQueue();
@@ -186,9 +188,21 @@
 
     const status = document.getElementById('sync-status');
     if (queue.length > 0) {
-      status.textContent = `${queue.length} entr${queue.length === 1 ? 'y' : 'ies'} queued, will sync when back online…`;
-      status.classList.add('visible');
+      // Only show the banner if the queue is still non-empty 3s from now —
+      // most entries sync almost instantly, and popping the banner in and out
+      // for those is just noise.
+      if (!syncStatusTimer) {
+        syncStatusTimer = setTimeout(() => {
+          syncStatusTimer = null;
+          const q = loadQueue();
+          if (q.length > 0) {
+            status.textContent = `${q.length} entr${q.length === 1 ? 'y' : 'ies'} queued, will sync when back online…`;
+            status.classList.add('visible');
+          }
+        }, 3000);
+      }
     } else {
+      if (syncStatusTimer) { clearTimeout(syncStatusTimer); syncStatusTimer = null; }
       status.classList.remove('visible');
     }
   }
