@@ -222,9 +222,16 @@
       }
       queue.shift();
       saveQueue(queue);
+      // Fold the synced item into the cached server total immediately, so the
+      // displayed number stays put instead of dipping back down until the
+      // authoritative refresh below lands.
+      const totals = loadCachedTotals();
+      totals.total_calories += item.calories || 0;
+      totals.total_protein += item.protein || 0;
+      saveCachedTotals(totals);
       renderDisplay();
     }
-    // Re-sync authoritative totals from the server once the queue drains
+    // Re-sync authoritative totals (and latest_id) from the server once the queue drains
     if (queue.length === 0) await loadNutrition();
   }
 
