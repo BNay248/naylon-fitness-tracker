@@ -114,6 +114,15 @@ def add_food(req: FoodRequest, request: Request):
     db.add_food(user["username"], {"name": req.name, "calories": req.calories, "protein": req.protein})
     return {"ok": True}
 
+@app.put("/api/foods/{food_id}")
+def update_food(food_id: str, req: FoodRequest, request: Request):
+    user = get_current_user(request)
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    if not db.update_food(user["username"], food_id, {"name": req.name.strip(), "calories": req.calories, "protein": req.protein}):
+        raise HTTPException(status_code=404, detail="Food not found")
+    return {"ok": True}
+
 @app.delete("/api/foods/{food_id}")
 def delete_food(food_id: str, request: Request):
     get_current_user(request)

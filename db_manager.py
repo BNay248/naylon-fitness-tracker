@@ -64,6 +64,20 @@ class TrainerDB:
         except:
             return False
 
+    def update_food(self, username: str, food_id: str, food: Dict) -> bool:
+        try:
+            result = self.db.foods.update_one(
+                {'_id': ObjectId(food_id), 'username': username},
+                {'$set': {
+                    'name': food.get('name'),
+                    'calories': int(food.get('calories', 0)),
+                    'protein': int(food.get('protein', 0)),
+                }}
+            )
+            return result.matched_count > 0
+        except:
+            return False
+
     def update_food_position(self, food_id: str, new_position: int) -> bool:
         try:
             food = self.db.foods.find_one({'_id': ObjectId(food_id)})

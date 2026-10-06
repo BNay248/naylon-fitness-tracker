@@ -23,9 +23,15 @@
   .food-row { display: flex; align-items: center; gap: 10px; padding: 12px 0; border-bottom: 1px solid #222; }
   .food-row .food-name { flex: 1; font-weight: 600; }
   .food-row .food-cal { color: #aaa; font-size: 13px; min-width: 70px; }
-  .food-row input[type=number] { width: 60px; padding: 6px; border-radius: 6px; border: 1px solid #555; background: #262730; color: white; text-align: center; }
+  .food-row input { padding: 6px; border-radius: 6px; border: 1px solid #555; background: #262730; color: white; font-size: 14px; min-width: 0; }
+  .food-row input[type=text] { flex: 1; }
+  .food-row input[type=number] { width: 64px; text-align: center; }
   .food-row button { padding: 6px 12px; border-radius: 6px; border: none; font-size: 13px; cursor: pointer; }
-  .set-btn { background: #3a3a4a; color: white; }
+  .food-row.dragging { opacity: 0.6; background: #1e1e2e; }
+  .drag-handle { color: #666; font-size: 18px; padding: 4px 6px; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .food-row.dragging .drag-handle { cursor: grabbing; }
+  .edit-btn, .cancel-btn { background: #3a3a4a; color: white; }
+  .save-btn { background: #4a90d9; color: white; }
   .del-btn { background: #6b2020; color: white; }
   .auth-box { max-width: 360px; margin: 60px auto; background: #1e1e2e; border-radius: 12px; padding: 24px; }
   .auth-box h2 { margin-bottom: 16px; }
@@ -100,19 +106,100 @@
     const foods = await res.json();
     const list = document.getElementById('food-list');
     list.innerHTML = '';
-    foods.forEach((food, idx) => {
-      const row = document.createElement('div');
-      row.className = 'food-row';
-      row.innerHTML = `
-        <div class="food-name">${food.name}</div>
-        <div class="food-cal">${food.calories} kcal</div>
-        <div class="food-protein">${food.protein} g</div>
-        <input type="number" id="pos-${food.id}" value="${food.position}" min="1" max="${foods.length}">
-        <button class="set-btn" onclick="setPosition('${food.id}', ${foods.length})">Set</button>
-        <button class="del-btn" onclick="deleteFood('${food.id}')">Delete</button>
-      `;
-      list.appendChild(row);
+    foods.forEach(food => list.appendChild(renderRow(food)));
+  }
+
+  function renderRow(food) {
+    const row = document.createElement('div');
+    row.className = 'food-row';
+    row.innerHTML = `
+      <div class="drag-handle" title="Drag to reorder">&#9776;</div>
+      <div class="food-name"></div>
+      <div class="food-cal">${food.calories} kcal</div>
+      <div class="food-protein">${food.protein} g</div>
+      <button class="edit-btn">Edit</button>
+      <button class="del-btn">Delete</button>
+    `;
+    row.querySelector('.food-name').textContent = food.name;
+    row.querySelector('.drag-handle').addEventListener('pointerdown', e => startDrag(e, row, food.id));
+    row.querySelector('.edit-btn').onclick = () => startEdit(row, food);
+    row.querySelector('.del-btn').onclick = () => deleteFood(food.id);
+    return row;
+  }
+
+  function startEdit(row, food) {
+    row.innerHTML = `
+      <input type="text" class="edit-name" placeholder="Name">
+      <input type="number" class="edit-cal" min="0" title="Calories">
+      <input type="number" class="edit-protein" min="0" title="Protein">
+      <button class="save-btn">Save</button>
+      <button class="cancel-btn">Cancel</button>
+    `;
+    const nameInput = row.querySelector('.edit-name');
+    nameInput.value = food.name;
+    row.querySelector('.edit-cal').value = food.calories;
+    row.querySelector('.edit-protein').value = food.protein;
+    const save = () => saveFood(row, food.id);
+    row.querySelector('.save-btn').onclick = save;
+    row.querySelector('.cancel-btn').onclick = () => row.replaceWith(renderRow(food));
+    row.querySelectorAll('input').forEach(input => input.addEventListener('keydown', e => {
+      if (e.key === 'Enter') save();
+      if (e.key === 'Escape') row.replaceWith(renderRow(food));
+    }));
+    nameInput.focus();
+  }
+
+  async function saveFood(row, id) {
+    const name = row.querySelector('.edit-name').value.trim();
+    const calories = parseInt(row.querySelector('.edit-cal').value) || 0;
+    const protein = parseInt(row.querySelector('.edit-protein').value) || 0;
+    if (!name) return alert('Please enter a food name');
+    const res = await fetch(`/api/foods/${id}`, {
+      method: 'PUT', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, calories, protein})
     });
+    if (!res.ok) return alert('Failed to save food');
+    loadFoods();
+  }
+
+  function startDrag(e, row, id) {
+    e.preventDefault();
+    const handle = e.currentTarget;
+    const list = row.parentElement;
+    const startIdx = [...list.children].indexOf(row);
+    handle.setPointerCapture(e.pointerId);
+    row.classList.add('dragging');
+
+    const onMove = ev => {
+      const y = ev.clientY;
+      let prev = row.previousElementSibling, next = row.nextElementSibling;
+      while (prev && y < prev.getBoundingClientRect().top + prev.offsetHeight / 2) {
+        list.insertBefore(row, prev);
+        prev = row.previousElementSibling;
+      }
+      while (next && y > next.getBoundingClientRect().top + next.offsetHeight / 2) {
+        list.insertBefore(next, row);
+        next = row.nextElementSibling;
+      }
+    };
+
+    const onUp = async () => {
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      row.classList.remove('dragging');
+      const newIdx = [...list.children].indexOf(row);
+      if (newIdx === startIdx) return;
+      await fetch(`/api/foods/${id}/position`, {
+        method: 'PATCH', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({position: newIdx + 1})
+      });
+      loadFoods();
+    };
+
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
   }
 
   async function addFood() {
@@ -135,15 +222,6 @@
     loadFoods();
   }
 
-  async function setPosition(id, total) {
-    const pos = parseInt(document.getElementById(`pos-${id}`).value);
-    await fetch(`/api/foods/${id}/position`, {
-      method: 'PATCH', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({position: pos})
-    });
-    loadFoods();
-  }
-
   fetch('/api/me').then(res => {
     if (res.ok) showApp();
     else {
@@ -151,7 +229,8 @@
     }
   });
 
-  document.addEventListener('keydown', e => { if (e.key === 'Enter') addFood(); });
+  document.querySelectorAll('.add-form input').forEach(input =>
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') addFood(); }));
 </script>
 </body>
 </html>
