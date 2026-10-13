@@ -72,14 +72,14 @@
   .food-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
   .food-btn {
     display: flex; align-items: center; justify-content: center;
-    aspect-ratio: 1/1; background: #262730; color: white;
+    aspect-ratio: 2/1; background: #262730; color: white;
     border: 1px solid #555; border-radius: 10px; text-align: center;
-    font-size: 13px; font-weight: 600; padding: 8px; overflow: hidden;
+    font-size: 13px; font-weight: 600; padding: 4px 8px; overflow: hidden;
     cursor: pointer; word-break: break-word; hyphens: auto; line-height: 1.3;
     transition: background 0.15s; user-select: none;
   }
   .food-btn:active { background: #4a4a6a; }
-  .food-btn span { display: -webkit-box; -webkit-line-clamp: 4; line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .food-btn span { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
   .welcome { font-size: 13px; color: #aaa; }
 </style>
 </head>
@@ -130,12 +130,11 @@
 
   <div id="sync-status" class="sync-status"></div>
 
-  <button class="manual-toggle" onclick="toggleManualForm()">✏️ Enter values manually</button>
+  <button class="manual-toggle" onclick="toggleManualForm()">✏️ Set today's totals manually</button>
   <div class="manual-form" id="manual-form">
-    <input id="manual-name" type="text" placeholder="Name (optional)">
     <input id="manual-cal" type="number" placeholder="Calories" min="0" inputmode="numeric">
     <input id="manual-protein" type="number" placeholder="Protein" min="0" inputmode="numeric">
-    <button onclick="addManualEntry()">Log Entry</button>
+    <button onclick="setManualTotals()">Set Totals</button>
   </div>
 
   <div class="food-grid" id="food-grid"></div>
@@ -177,10 +176,9 @@
   function renderDisplay() {
     const server = loadCachedTotals();
     const queue = loadQueue();
-    const pendingCal = queue.reduce((s, e) => s + (e.calories || 0), 0);
-    const pendingProtein = queue.reduce((s, e) => s + (e.protein || 0), 0);
-    document.getElementById('calorie-total').textContent = server.total_calories + pendingCal;
-    document.getElementById('protein-total').textContent = server.total_protein + pendingProtein;
+    const totals = currentTotals();
+    document.getElementById('calorie-total').textContent = totals.calories;
+    document.getElementById('protein-total').textContent = totals.protein;
     latestEntryId = server.latest_id;
 
     const undoBtn = document.getElementById('undo-btn');
@@ -329,19 +327,39 @@
     flushQueue();
   }
 
-  function toggleManualForm() {
-    document.getElementById('manual-form').classList.toggle('open');
+  // Totals as currently displayed: last known server totals plus anything still queued
+  function currentTotals() {
+    const server = loadCachedTotals();
+    const queue = loadQueue();
+    return {
+      calories: server.total_calories + queue.reduce((s, e) => s + (e.calories || 0), 0),
+      protein: server.total_protein + queue.reduce((s, e) => s + (e.protein || 0), 0),
+    };
   }
 
-  function addManualEntry() {
-    const name = document.getElementById('manual-name').value.trim();
-    const calories = parseInt(document.getElementById('manual-cal').value) || 0;
-    const protein = parseInt(document.getElementById('manual-protein').value) || 0;
-    if (!calories && !protein) return alert('Enter calories or protein');
-    addEntry(null, name, calories, protein);
-    document.getElementById('manual-name').value = '';
-    document.getElementById('manual-cal').value = '';
-    document.getElementById('manual-protein').value = '';
+  function toggleManualForm() {
+    const form = document.getElementById('manual-form');
+    if (form.classList.toggle('open')) {
+      // Prefill with the current totals so the user edits them in place
+      const { calories, protein } = currentTotals();
+      document.getElementById('manual-cal').value = calories;
+      document.getElementById('manual-protein').value = protein;
+    }
+  }
+
+  function setManualTotals() {
+    const calInput = document.getElementById('manual-cal').value.trim();
+    const proteinInput = document.getElementById('manual-protein').value.trim();
+    const current = currentTotals();
+    // A blank field leaves that metric unchanged
+    const targetCal = calInput === '' ? current.calories : parseInt(calInput);
+    const targetProtein = proteinInput === '' ? current.protein : parseInt(proteinInput);
+    if (isNaN(targetCal) || isNaN(targetProtein)) return alert('Enter whole numbers');
+    // Log the difference as a single +/- adjustment entry so history still adds up
+    const calDelta = targetCal - current.calories;
+    const proteinDelta = targetProtein - current.protein;
+    if (calDelta || proteinDelta) addEntry(null, 'Manual adjustment', calDelta, proteinDelta);
+    document.getElementById('manual-form').classList.remove('open');
   }
 
   async function undo() {
