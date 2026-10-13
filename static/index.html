@@ -112,6 +112,7 @@
     <a href="/" class="active">Tracker</a>
     <a href="/foods">Foods</a>
     <a href="/history">History</a>
+    <a id="trainer-link" href="#" hidden>Training</a>
     <button class="logout-btn" onclick="logout()">Logout</button>
   </nav>
 
@@ -283,6 +284,7 @@
   }
 
   async function showApp() {
+    loadTrainerLink();
     document.getElementById('auth-section').classList.add('hidden');
     document.getElementById('app-section').classList.remove('hidden');
     loadFoods();
@@ -392,6 +394,15 @@
   setInterval(flushQueue, 20000);
 
   // Check if already logged in
+  // Single sign-on: the same login covers the trainer app, so link to it when it's configured.
+  async function loadTrainerLink() {
+    try {
+      const me = await (await fetch('/api/me')).json();
+      const link = document.getElementById('trainer-link');
+      if (me.trainer_url) { link.href = me.trainer_url; link.hidden = false; }
+    } catch {} // offline: no link
+  }
+
   fetch('/api/me').then(res => {
     if (res.ok) showApp();
   });

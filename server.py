@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, Response, Cookie, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import datetime, date, time, timedelta
+from datetime import datetime, date, time, timedelta, timezone
 from db_manager import TrainerDB
 from pydantic import BaseModel
 from jose import jwt, JWTError
@@ -17,25 +17,39 @@ SECRET = os.environ.get("JWT_SECRET", "")
 if len(SECRET) < 32:
     raise RuntimeError("Set JWT_SECRET to a random value of at least 32 characters (e.g. `python3 -c \"import secrets; print(secrets.token_hex(32))\"`)")
 ALGORITHM = "HS256"
-COOKIE_NAME = "tracker_session"
+TOKEN_DAYS = 30
+# Single sign-on with the trainer app: both apps share this cookie, its secret and the users collection.
+# COOKIE_DOMAIN (e.g. chowmeinframe.com) scopes it to every subdomain; unset, it stays on the current host (local dev).
+COOKIE_NAME = "nfp_session"
+LEGACY_COOKIES = ["tracker_session"]
+COOKIE_DOMAIN = os.environ.get("COOKIE_DOMAIN") or None
+TRAINER_URL = os.environ.get("TRAINER_URL", "")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # ==================== HELPERS ====================
 
-def create_token(username: str, name: str) -> str:
-    expire = datetime.utcnow() + timedelta(days=30)
-    return jwt.encode({"username": username, "name": name, "exp": expire}, SECRET, algorithm=ALGORITHM)
+def create_token(username: str) -> str:
+    # Same payload as the trainer app's tokens, so either app's cookie works in both.
+    expire = datetime.now(timezone.utc) + timedelta(days=TOKEN_DAYS)
+    return jwt.encode({"username": username, "exp": expire}, SECRET, algorithm=ALGORITHM)
+
+def set_session_cookie(response: Response, username: str) -> None:
+    response.set_cookie(COOKIE_NAME, create_token(username), httponly=True, max_age=86400 * TOKEN_DAYS, samesite="lax",
+                        domain=COOKIE_DOMAIN, secure=bool(COOKIE_DOMAIN))
 
 def get_current_user(request: Request):
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
-        payload = jwt.decode(token, SECRET, algorithms=[ALGORITHM])
-        return payload
-    except JWTError:
+        username = jwt.decode(token, SECRET, algorithms=[ALGORITHM])["username"]
+    except (JWTError, KeyError):
         raise HTTPException(status_code=401, detail="Invalid token")
+    user = db.get_user_by_username(username)
+    if not user:
+        raise HTTPException(status_code=401, detail="User no longer exists")
+    return user
 
 # ==================== PAGES ====================
 
@@ -69,34 +83,38 @@ class RegisterRequest(BaseModel):
 
 @app.post("/api/login")
 def login(req: LoginRequest, response: Response):
-    user = db.get_user_by_username(req.username)
-    if not user or not bcrypt.checkpw(req.password.encode(), user["password"].encode()):
+    user = db.get_user_by_username(req.username.strip())
+    if not user or not user.get("password") or not bcrypt.checkpw(req.password.encode(), user["password"].encode()):
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    token = create_token(req.username, user.get("name", ""))
-    response.set_cookie(COOKIE_NAME, token, httponly=True, max_age=86400*30, samesite="lax")
+    set_session_cookie(response, user["username"])
     return {"ok": True, "name": user.get("name", "")}
 
 @app.post("/api/register")
 def register(req: RegisterRequest, response: Response):
-    if db.get_user_by_username(req.username):
+    # Same rules as the trainer app's register: one account works in both.
+    username, name, email = req.username.strip(), req.name.strip(), req.email.strip()
+    if not username or not name or not email or not req.password:
+        raise HTTPException(status_code=400, detail="Please fill all fields")
+    if db.get_user_by_username(username):
         raise HTTPException(status_code=400, detail="Username already exists")
     if len(req.password) < 6:
         raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
     hashed = bcrypt.hashpw(req.password.encode(), bcrypt.gensalt()).decode()
-    db.add_user({"username": req.username, "name": req.name, "email": req.email, "password": hashed})
-    token = create_token(req.username, req.name)
-    response.set_cookie(COOKIE_NAME, token, httponly=True, max_age=86400*30, samesite="lax")
-    return {"ok": True, "name": req.name}
+    db.add_user({"username": username, "name": name, "email": email, "password": hashed, "role": "client"})
+    set_session_cookie(response, username)
+    return {"ok": True, "name": name}
 
 @app.post("/api/logout")
 def logout(response: Response):
-    response.delete_cookie(COOKIE_NAME)
+    response.delete_cookie(COOKIE_NAME, domain=COOKIE_DOMAIN, secure=bool(COOKIE_DOMAIN), httponly=True, samesite="lax")
+    for name in LEGACY_COOKIES:
+        response.delete_cookie(name)
     return {"ok": True}
 
 @app.get("/api/me")
 def me(request: Request):
     user = get_current_user(request)
-    return {"username": user["username"], "name": user["name"]}
+    return {"username": user["username"], "name": user.get("name", ""), "trainer_url": TRAINER_URL}
 
 # ==================== FOODS ====================
 
@@ -128,8 +146,9 @@ def update_food(food_id: str, req: FoodRequest, request: Request):
 
 @app.delete("/api/foods/{food_id}")
 def delete_food(food_id: str, request: Request):
-    get_current_user(request)
-    db.delete_food(food_id)
+    user = get_current_user(request)
+    if not db.delete_food(user["username"], food_id):
+        raise HTTPException(status_code=404, detail="Food not found")
     return {"ok": True}
 
 class PositionRequest(BaseModel):
@@ -137,8 +156,9 @@ class PositionRequest(BaseModel):
 
 @app.patch("/api/foods/{food_id}/position")
 def update_position(food_id: str, req: PositionRequest, request: Request):
-    get_current_user(request)
-    db.update_food_position(food_id, req.position)
+    user = get_current_user(request)
+    if not db.update_food_position(user["username"], food_id, req.position):
+        raise HTTPException(status_code=404, detail="Food not found")
     return {"ok": True}
 
 # ==================== CALORIES ====================
@@ -192,8 +212,9 @@ def add_nutrition(req: EntryRequest, request: Request):
 
 @app.delete("/api/nutrition/{entry_id}")
 def delete_nutrition(entry_id: str, request: Request):
-    get_current_user(request)
-    db.delete_nutrition_entry(entry_id)
+    user = get_current_user(request)
+    if not db.delete_nutrition_entry(user["username"], entry_id):
+        raise HTTPException(status_code=404, detail="Entry not found")
     return {"ok": True}
 
 @app.get("/api/nutrition/history")

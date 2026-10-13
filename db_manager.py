@@ -53,10 +53,10 @@ class TrainerDB:
             foods = list(self.db.foods.find({'username': username}).sort(sort_by, direction))
         return foods
 
-    def delete_food(self, food_id: str) -> bool:
+    def delete_food(self, username: str, food_id: str) -> bool:
         try:
-            food = self.db.foods.find_one({'_id': ObjectId(food_id)})
-            result = self.db.foods.delete_one({'_id': ObjectId(food_id)})
+            food = self.db.foods.find_one({'_id': ObjectId(food_id), 'username': username})
+            result = self.db.foods.delete_one({'_id': ObjectId(food_id), 'username': username})
             if result.deleted_count > 0 and food:
                 self.normalize_food_positions(food['username'])
                 return True
@@ -78,9 +78,9 @@ class TrainerDB:
         except:
             return False
 
-    def update_food_position(self, food_id: str, new_position: int) -> bool:
+    def update_food_position(self, username: str, food_id: str, new_position: int) -> bool:
         try:
-            food = self.db.foods.find_one({'_id': ObjectId(food_id)})
+            food = self.db.foods.find_one({'_id': ObjectId(food_id), 'username': username})
             if not food:
                 return False
             username = food['username']
@@ -145,9 +145,9 @@ class TrainerDB:
         ]
         return list(self.db.nutrition_entries.aggregate(pipeline))
 
-    def delete_nutrition_entry(self, entry_id: str) -> bool:
+    def delete_nutrition_entry(self, username: str, entry_id: str) -> bool:
         try:
-            result = self.db.nutrition_entries.delete_one({"_id": ObjectId(entry_id)})
+            result = self.db.nutrition_entries.delete_one({"_id": ObjectId(entry_id), "username": username})
             return result.deleted_count > 0
         except:
             return False

@@ -57,6 +57,7 @@
     <a href="/">Tracker</a>
     <a href="/foods" class="active">Foods</a>
     <a href="/history">History</a>
+    <a id="trainer-link" href="#" hidden>Training</a>
     <button class="logout-btn" onclick="logout()">Logout</button>
   </nav>
   <h1>Foods</h1>
@@ -95,6 +96,7 @@
   }
 
   function showApp() {
+    loadTrainerLink();
     document.getElementById('auth-section').classList.add('hidden');
     document.getElementById('app-section').classList.remove('hidden');
     loadFoods();
@@ -220,6 +222,15 @@
   async function deleteFood(id) {
     await fetch(`/api/foods/${id}`, {method: 'DELETE'});
     loadFoods();
+  }
+
+  // Single sign-on: the same login covers the trainer app, so link to it when it's configured.
+  async function loadTrainerLink() {
+    try {
+      const me = await (await fetch('/api/me')).json();
+      const link = document.getElementById('trainer-link');
+      if (me.trainer_url) { link.href = me.trainer_url; link.hidden = false; }
+    } catch {} // offline: no link
   }
 
   fetch('/api/me').then(res => {
