@@ -12,7 +12,10 @@ import os
 app = FastAPI()
 db = TrainerDB()
 
-SECRET = os.environ.get("JWT_SECRET", "change-this-to-something-random")
+# Signs login cookies, so it must be private: required from the environment, never defaulted.
+SECRET = os.environ.get("JWT_SECRET", "")
+if len(SECRET) < 32:
+    raise RuntimeError("Set JWT_SECRET to a random value of at least 32 characters (e.g. `python3 -c \"import secrets; print(secrets.token_hex(32))\"`)")
 ALGORITHM = "HS256"
 COOKIE_NAME = "tracker_session"
 
