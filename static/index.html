@@ -314,7 +314,7 @@
     foods.forEach(food => {
       const btn = document.createElement('div');
       btn.className = 'food-btn';
-      btn.innerHTML = `<span>${food.name}</span>`;
+      btn.appendChild(document.createElement('span')).textContent = food.name;
       btn.onclick = () => addEntry(food.id, null, food.calories, food.protein);
       grid.appendChild(btn);
     });

@@ -1,13 +1,16 @@
 from fastapi import FastAPI, Request, Response, Cookie, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.middleware.cors import CORSMiddleware
 from datetime import datetime, date, time, timedelta, timezone
 from db_manager import TrainerDB
 from pydantic import BaseModel
+from collections import defaultdict, deque
+from typing import Dict
+from urllib.parse import urlparse
 from jose import jwt, JWTError
 import bcrypt
 import os
+import re
 
 app = FastAPI()
 db = TrainerDB()
@@ -27,12 +30,87 @@ TRAINER_URL = os.environ.get("TRAINER_URL", "")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+# ==================== SECURITY ====================
+# The same protections run in the trainer, templates and tracker apps; keep them in step.
+
+UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+SECURITY_HEADERS = {"X-Content-Type-Options": "nosniff", "X-Frame-Options": "DENY", "Referrer-Policy": "same-origin",
+                    "Content-Security-Policy": "frame-ancestors 'none'"}
+USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
+LOGIN_WINDOW = 15 * 60
+LOGIN_LIMIT_PER_ACCOUNT = 10  # failed logins per window for one username from one address
+LOGIN_LIMIT_PER_ADDRESS = 50  # failed logins per window from one address, any username
+failed_logins: Dict[tuple, deque] = defaultdict(deque)
+
+
+def same_origin(request: Request) -> bool:
+    """Whether a request came from this site's own pages. The login cookie is shared with every subdomain of the
+    cookie domain, so a page on a sibling subdomain counts as same-site and would get the cookie attached."""
+    site = request.headers.get("sec-fetch-site")
+    if site:
+        return site in ("same-origin", "none")
+    origin = request.headers.get("origin")
+    return not origin or urlparse(origin).netloc == request.headers.get("host")
+
+
+@app.middleware("http")
+async def protect(request: Request, call_next):
+    if request.method in UNSAFE_METHODS and request.url.path.startswith("/api/") and not same_origin(request):
+        return JSONResponse({"detail": "Cross-site request blocked"}, status_code=403)
+    response = await call_next(request)
+    for name, value in SECURITY_HEADERS.items():
+        response.headers.setdefault(name, value)
+    return response
+
+
+def client_address(request: Request) -> str:
+    # Behind Apache, trust the address it appended to X-Forwarded-For, but only when the request came from the local proxy.
+    host = request.client.host if request.client else ""
+    forwarded = request.headers.get("x-forwarded-for")
+    return forwarded.split(",")[-1].strip() if forwarded and host in ("127.0.0.1", "::1") else host
+
+
+def login_limits(request: Request, username: str) -> Dict[tuple, int]:
+    address = client_address(request)
+    return {(address, username.lower()): LOGIN_LIMIT_PER_ACCOUNT, (address,): LOGIN_LIMIT_PER_ADDRESS}
+
+
+def check_login_allowed(limits: Dict[tuple, int]) -> None:
+    now = datetime.now(timezone.utc).timestamp()
+    for key, limit in limits.items():
+        attempts = failed_logins[key]
+        while attempts and now - attempts[0] > LOGIN_WINDOW:
+            attempts.popleft()
+        if not attempts:
+            del failed_logins[key]
+        elif len(attempts) >= limit:
+            minutes = int((LOGIN_WINDOW - (now - attempts[0])) // 60) + 1
+            raise HTTPException(status_code=429, detail=f"Too many failed logins. Try again in {minutes} minute{'s' if minutes != 1 else ''}.")
+
+
+def record_failed_login(limits: Dict[tuple, int]) -> None:
+    now = datetime.now(timezone.utc).timestamp()
+    for key in limits:
+        failed_logins[key].append(now)
+
+
+def check_registration(username: str, name: str, email: str) -> None:
+    if not USERNAME_PATTERN.match(username):
+        raise HTTPException(status_code=400, detail="Usernames are up to 40 letters, numbers, dots, dashes or underscores")
+    if len(name) > 80 or len(email) > 120:
+        raise HTTPException(status_code=400, detail="Name or email is too long")
+
+
+def token_revoked(payload: Dict, user: Dict) -> bool:
+    """Tokens issued before the user's last password change (tokens_valid_after, epoch seconds) no longer work."""
+    return payload.get("iat", 0) < user.get("tokens_valid_after", 0)
+
 # ==================== HELPERS ====================
 
 def create_token(username: str) -> str:
     # Same payload as the trainer app's tokens, so either app's cookie works in both.
-    expire = datetime.now(timezone.utc) + timedelta(days=TOKEN_DAYS)
-    return jwt.encode({"username": username, "exp": expire}, SECRET, algorithm=ALGORITHM)
+    now = datetime.now(timezone.utc)
+    return jwt.encode({"username": username, "iat": int(now.timestamp()), "exp": now + timedelta(days=TOKEN_DAYS)}, SECRET, algorithm=ALGORITHM)
 
 def set_session_cookie(response: Response, username: str) -> None:
     response.set_cookie(COOKIE_NAME, create_token(username), httponly=True, max_age=86400 * TOKEN_DAYS, samesite="lax",
@@ -43,12 +121,15 @@ def get_current_user(request: Request):
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
     try:
-        username = jwt.decode(token, SECRET, algorithms=[ALGORITHM])["username"]
+        payload = jwt.decode(token, SECRET, algorithms=[ALGORITHM])
+        username = payload["username"]
     except (JWTError, KeyError):
         raise HTTPException(status_code=401, detail="Invalid token")
     user = db.get_user_by_username(username)
     if not user:
         raise HTTPException(status_code=401, detail="User no longer exists")
+    if token_revoked(payload, user):
+        raise HTTPException(status_code=401, detail="Please log in again")
     return user
 
 # ==================== PAGES ====================
@@ -82,9 +163,12 @@ class RegisterRequest(BaseModel):
     password: str
 
 @app.post("/api/login")
-def login(req: LoginRequest, response: Response):
+def login(req: LoginRequest, request: Request, response: Response):
+    limits = login_limits(request, req.username.strip())
+    check_login_allowed(limits)
     user = db.get_user_by_username(req.username.strip())
     if not user or not user.get("password") or not bcrypt.checkpw(req.password.encode(), user["password"].encode()):
+        record_failed_login(limits)
         raise HTTPException(status_code=401, detail="Invalid credentials")
     set_session_cookie(response, user["username"])
     return {"ok": True, "name": user.get("name", "")}
@@ -95,6 +179,7 @@ def register(req: RegisterRequest, response: Response):
     username, name, email = req.username.strip(), req.name.strip(), req.email.strip()
     if not username or not name or not email or not req.password:
         raise HTTPException(status_code=400, detail="Please fill all fields")
+    check_registration(username, name, email)
     if db.get_user_by_username(username):
         raise HTTPException(status_code=400, detail="Username already exists")
     if len(req.password) < 6:
@@ -132,7 +217,9 @@ class FoodRequest(BaseModel):
 @app.post("/api/foods")
 def add_food(req: FoodRequest, request: Request):
     user = get_current_user(request)
-    db.add_food(user["username"], {"name": req.name, "calories": req.calories, "protein": req.protein})
+    if not req.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    db.add_food(user["username"], {"name": req.name.strip()[:100], "calories": req.calories, "protein": req.protein})
     return {"ok": True}
 
 @app.put("/api/foods/{food_id}")
@@ -140,7 +227,7 @@ def update_food(food_id: str, req: FoodRequest, request: Request):
     user = get_current_user(request)
     if not req.name.strip():
         raise HTTPException(status_code=400, detail="Name is required")
-    if not db.update_food(user["username"], food_id, {"name": req.name.strip(), "calories": req.calories, "protein": req.protein}):
+    if not db.update_food(user["username"], food_id, {"name": req.name.strip()[:100], "calories": req.calories, "protein": req.protein}):
         raise HTTPException(status_code=404, detail="Food not found")
     return {"ok": True}
 
@@ -197,7 +284,7 @@ def add_nutrition(req: EntryRequest, request: Request):
     else:
         if req.calories is None and req.protein is None:
             raise HTTPException(status_code=400, detail="Provide a food_id or calories/protein")
-        food_name = req.name.strip() if req.name and req.name.strip() else "Manual entry"
+        food_name = req.name.strip()[:100] if req.name and req.name.strip() else "Manual entry"
         calories = int(req.calories or 0)
         protein = int(req.protein or 0)
     db.add_nutrition_entry({
